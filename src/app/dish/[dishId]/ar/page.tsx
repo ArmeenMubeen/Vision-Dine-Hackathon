@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { X, Camera, Box, Volume2 } from 'lucide-react';
+import { X, Camera, Box } from 'lucide-react';
 import { Playfair_Display } from 'next/font/google';
 
 const playfair = Playfair_Display({ subsets: ['latin'] });
@@ -17,62 +17,104 @@ export default function MobileARPage() {
   const [restaurantName, setRestaurantName] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [hasStarted, setHasStarted] = useState(false);
-  const [hasModel, setHasModel] = useState(false);
-  const modelViewerRef = React.useRef<any>(null);
+  const [modelStatus, setModelStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [debugInfo, setDebugInfo] = useState<string>('');
+  const modelViewerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  // Fetch dish data
   useEffect(() => {
-    console.log('[VisionDine AR] dishId:', dishId);
-    import('@google/model-viewer').catch(console.error);
+    console.log('[AR] dishId:', dishId);
 
-    async function fetchDishDetails() {
+    async function fetchDish() {
       if (!dishId) return;
       try {
-        const { data: dishData, error: dishError } = await supabase
+        const { data, error } = await supabase
           .from('dishes')
           .select('*, restaurants(name)')
           .eq('id', dishId)
           .single();
 
-        if (dishError) throw dishError;
+        if (error) throw error;
 
-        console.log('[VisionDine AR] Data:', {
-          name: dishData.dish_name,
-          glb: dishData.glb_url,
-          usdz: dishData.usdz_url,
-          image: dishData.image_url,
-        });
+        console.log('[AR] Dish fetched:', JSON.stringify({
+          name: data.dish_name,
+          glb_url: data.glb_url,
+          usdz_url: data.usdz_url,
+          image_url: data.image_url,
+        }, null, 2));
 
-        setDish(dishData);
-        // Only flag as having a model if we have a real URL
-        const glbValid = dishData.glb_url && dishData.glb_url.startsWith('http');
-        const usdzValid = dishData.usdz_url && dishData.usdz_url.startsWith('http');
-        setHasModel(glbValid || usdzValid);
+        setDish(data);
+        setDebugInfo(`GLB: ${data.glb_url || 'NONE'}`);
 
-        if (dishData.restaurants?.name) {
-          setRestaurantName(dishData.restaurants.name);
+        if (data.restaurants?.name) {
+          setRestaurantName(data.restaurants.name);
         }
-      } catch (error) {
-        console.error('[VisionDine AR] Fetch error:', error);
+      } catch (err: any) {
+        console.error('[AR] Fetch error:', err);
+        setDebugInfo(`DB Error: ${err.message}`);
       } finally {
         setIsLoading(false);
       }
     }
 
-    fetchDishDetails();
+    fetchDish();
   }, [dishId]);
 
-  const handleLaunchAR = useCallback(() => {
-    setHasStarted(true);
-    // After render, try to activate native AR via user gesture
-    setTimeout(() => {
-      const mv = modelViewerRef.current;
-      if (mv && mv.activateAR) {
-        mv.activateAR().catch(() => {
-          console.log('[VisionDine AR] activateAR not available (expected on desktop)');
-        });
-      }
-    }, 600);
+  // Load model-viewer library
+  useEffect(() => {
+    import('@google/model-viewer')
+      .then(() => console.log('[AR] model-viewer library loaded'))
+      .catch((err) => console.error('[AR] model-viewer library FAILED:', err));
   }, []);
+
+  // Attach native event listeners to model-viewer (React events DON'T work on web components)
+  useEffect(() => {
+    if (!hasStarted || !dish) return;
+
+    // Wait for the custom element to be in the DOM
+    const timer = setTimeout(() => {
+      const mv = containerRef.current?.querySelector('model-viewer') as any;
+      if (!mv) {
+        console.error('[AR] model-viewer element not found in DOM');
+        return;
+      }
+
+      modelViewerRef.current = mv;
+      console.log('[AR] model-viewer element found, src:', mv.getAttribute('src'));
+
+      mv.addEventListener('load', () => {
+        console.log('[AR] ✅ Model loaded successfully!');
+        setModelStatus('loaded');
+        setDebugInfo('Model loaded ✅');
+      });
+
+      mv.addEventListener('error', (event: any) => {
+        console.error('[AR] ❌ Model error:', event?.detail || event);
+        setModelStatus('error');
+        setDebugInfo(`Model error: ${JSON.stringify(event?.detail || 'Unknown')}`);
+      });
+
+      mv.addEventListener('progress', (event: any) => {
+        const progress = Math.round((event?.detail?.totalProgress || 0) * 100);
+        console.log(`[AR] Loading: ${progress}%`);
+        if (progress > 0 && progress < 100) {
+          setDebugInfo(`Loading model: ${progress}%`);
+        }
+      });
+
+      // Also try to activate AR after a delay (user gesture was the tap)
+      setTimeout(() => {
+        if (mv.activateAR) {
+          mv.activateAR().catch(() => {
+            console.log('[AR] activateAR not available (normal on desktop)');
+          });
+        }
+      }, 1000);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [hasStarted, dish]);
 
   const handleShare = async () => {
     if (navigator.share) {
@@ -82,7 +124,7 @@ export default function MobileARPage() {
           text: `Check out ${dish?.dish_name} in AR!`,
           url: window.location.href,
         });
-      } catch (e) { console.error(e); }
+      } catch (e) { /* user cancelled */ }
     } else {
       try {
         await navigator.clipboard.writeText(window.location.href);
@@ -93,7 +135,7 @@ export default function MobileARPage() {
 
   const handleCapture = async () => {
     const mv = modelViewerRef.current;
-    if (!mv) return;
+    if (!mv || !mv.toBlob) return;
     try {
       const blob = await mv.toBlob({ idealAspect: true, mimeType: 'image/png' });
       if (!blob) return;
@@ -134,12 +176,17 @@ export default function MobileARPage() {
       <div className="h-screen w-screen bg-[#0a1128] flex flex-col items-center justify-center text-white p-8">
         <Box className="w-12 h-12 text-[#e6c17a] mb-4" />
         <p className="text-lg font-bold mb-2">Dish Not Found</p>
-        <button onClick={() => router.back()} className="mt-4 px-6 py-3 bg-white/10 rounded-xl text-sm font-bold border border-white/10">Go Back</button>
+        <p className="text-white/40 text-sm text-center">{debugInfo}</p>
+        <button onClick={() => router.back()} className="mt-6 px-6 py-3 bg-white/10 rounded-xl text-sm font-bold border border-white/10">Go Back</button>
       </div>
     );
   }
 
-  // --- LAUNCH OVERLAY (User Gesture Gate for Camera) ---
+  const glbUrl = dish.glb_url;
+  const usdzUrl = dish.usdz_url;
+  const hasGlb = glbUrl && typeof glbUrl === 'string' && glbUrl.startsWith('http');
+
+  // --- LAUNCH OVERLAY ---
   if (!hasStarted) {
     return (
       <div className="h-screen w-screen bg-[#0a1128] flex flex-col items-center justify-center text-white p-8 font-sans relative overflow-hidden">
@@ -160,64 +207,41 @@ export default function MobileARPage() {
         </h1>
         <p className={`text-xl text-[#e6c17a] mb-2 z-10 ${playfair.className}`}>{dish.dish_name}</p>
         <p className="text-center text-white/40 mb-10 max-w-[280px] text-sm leading-relaxed z-10">
-          {hasModel
-            ? 'Experience this dish in life-sized 3D. Tap below to launch.'
-            : 'View this dish in a beautiful 3D showcase. Tap below to continue.'}
+          {hasGlb ? 'View this dish in interactive 3D and place it on your table with AR.' : 'View this dish in a premium showcase.'}
         </p>
 
         <button
-          onClick={handleLaunchAR}
+          onClick={() => setHasStarted(true)}
           className="w-full max-w-xs py-5 bg-gradient-to-r from-[#e6c17a] to-[#b38728] text-[#0a1128] font-bold rounded-2xl shadow-2xl active:scale-95 transition-transform tracking-widest text-xs z-10"
         >
-          {hasModel ? 'LAUNCH AR EXPERIENCE' : 'VIEW 3D SHOWCASE'}
+          {hasGlb ? '👁️ LAUNCH AR EXPERIENCE' : 'VIEW DISH'}
         </button>
 
-        <p className="mt-8 text-[10px] text-white/20 uppercase tracking-[0.2em] z-10">Powered by VisionScale™</p>
+        {/* Debug info - small, bottom */}
+        <p className="mt-6 text-[9px] text-white/15 z-10 max-w-xs text-center break-all">
+          {hasGlb ? `3D: ${glbUrl.substring(0, 60)}...` : 'No 3D model attached'}
+        </p>
+        <p className="mt-2 text-[10px] text-white/20 uppercase tracking-[0.2em] z-10">Powered by VisionScale™</p>
       </div>
     );
   }
 
-  // --- NO 3D MODEL: Show a premium image-only experience ---
-  if (!hasModel) {
+  // --- NO GLB: Image showcase ---
+  if (!hasGlb) {
     return (
       <div className="relative h-screen w-screen overflow-hidden bg-[#0a1128] text-white font-sans">
-        {/* Close */}
-        <button
-          onClick={() => router.back()}
-          className="absolute top-6 left-6 w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 z-20 active:scale-95 transition-transform"
-        >
+        <button onClick={() => router.back()} className="absolute top-6 left-6 w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 z-20 active:scale-95 transition-transform">
           <X className="w-5 h-5 text-white" />
         </button>
 
-        {/* Share */}
-        <button
-          onClick={handleShare}
-          className="absolute top-6 right-6 flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-[#f9ce34] via-[#ee2a7b] to-[#6228d7] border border-white/20 shadow-lg z-20 active:scale-95 transition-transform"
-        >
-          <svg className="w-4 h-4 text-white mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-          </svg>
-          <span className="text-white text-xs font-bold">Share</span>
-        </button>
-
-        {/* Restaurant Name */}
         <div className="absolute top-24 left-0 right-0 text-center z-10">
-          <h1 className={`text-4xl tracking-wide bg-gradient-to-b from-[#e6c17a] to-[#b38728] bg-clip-text text-transparent ${playfair.className}`}>
-            {restaurantName}
-          </h1>
+          <h1 className={`text-4xl tracking-wide bg-gradient-to-b from-[#e6c17a] to-[#b38728] bg-clip-text text-transparent ${playfair.className}`}>{restaurantName}</h1>
         </div>
 
-        {/* Centered Dish Image with glow */}
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="absolute w-72 h-72 bg-[#e6c17a]/15 rounded-full blur-[80px]"></div>
           {dish.image_url ? (
-            <img
-              src={dish.image_url}
-              alt={dish.dish_name}
-              className="w-64 h-64 object-cover rounded-[32px] border-2 border-white/10 shadow-2xl z-10 animate-[float_3s_ease-in-out_infinite]"
-            />
+            <img src={dish.image_url} alt={dish.dish_name} className="w-64 h-64 object-cover rounded-[32px] border-2 border-white/10 shadow-2xl z-10" style={{ animation: 'float 3s ease-in-out infinite' }} />
           ) : (
             <div className="w-64 h-64 bg-white/5 rounded-[32px] border-2 border-white/10 flex items-center justify-center z-10">
               <Camera className="w-16 h-16 text-white/20" />
@@ -225,98 +249,92 @@ export default function MobileARPage() {
           )}
         </div>
 
-        {/* Bottom */}
         <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 flex flex-col items-center z-10 bg-gradient-to-t from-[#0a1128] via-[#0a1128]/80 to-transparent">
           <h2 className={`text-3xl text-white mb-2 ${playfair.className}`}>{dish.dish_name}</h2>
-          <p className="text-white/40 text-sm mb-6">PKR {dish.price}</p>
-          <p className="text-[10px] text-white/30 bg-white/5 px-4 py-2 rounded-full border border-white/10">
-            Upload a .GLB model to enable full AR experience
-          </p>
+          <p className="text-white/40 text-sm mb-4">PKR {dish.price}</p>
+          <p className="text-[10px] text-white/30 bg-white/5 px-4 py-2 rounded-full border border-white/10">Upload a .GLB model to enable full 3D AR</p>
         </div>
 
-        <style jsx>{`
-          @keyframes float {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-12px); }
-          }
-        `}</style>
+        <style jsx>{`@keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-12px); } }`}</style>
       </div>
     );
   }
 
-  // --- FULL 3D AR EXPERIENCE (GLB model exists) ---
+  // --- FULL 3D AR EXPERIENCE ---
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-black text-white font-sans">
+    <div ref={containerRef} className="relative h-screen w-screen overflow-hidden bg-black text-white font-sans">
 
-      {/* model-viewer: NO poster so the 3D model renders immediately */}
-      {/* @ts-ignore */}
-      <model-viewer
-        ref={modelViewerRef}
-        src={dish.glb_url}
-        ios-src={dish.usdz_url || undefined}
-        ar
-        ar-modes="webxr scene-viewer quick-look"
-        camera-controls
-        auto-rotate
-        touch-action="none"
-        shadow-intensity="1.2"
-        shadow-softness="0.8"
-        exposure="0.9"
-        loading="eager"
-        reveal="auto"
-        camera-orbit="0deg 75deg 105%"
-        min-camera-orbit="auto auto 50%"
-        max-camera-orbit="auto auto 200%"
-        interaction-prompt="auto"
-        interaction-prompt-threshold="3000"
-        style={{ width: '100%', height: '100%', backgroundColor: 'transparent', '--poster-color': 'transparent' } as any}
-        alt={`3D model of ${dish.dish_name}`}
-      >
-        {/* Custom AR button inside model-viewer */}
-        <button slot="ar-button" style={{
-          position: 'absolute',
-          bottom: '130px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          padding: '14px 28px',
-          background: 'linear-gradient(to right, #e6c17a, #b38728)',
-          color: '#0a1128',
-          fontWeight: 'bold',
-          fontSize: '11px',
-          letterSpacing: '0.15em',
-          border: 'none',
-          borderRadius: '16px',
-          cursor: 'pointer',
-          boxShadow: '0 8px 32px rgba(230,193,122,0.3)',
-        }}>
-          👁️ PLACE IN YOUR SPACE
-        </button>
+      {/* 
+        CRITICAL: We use dangerouslySetInnerHTML to render model-viewer as raw HTML.
+        This is because React cannot properly bind events to custom web components.
+        The useEffect above finds the element and attaches native listeners.
+      */}
+      <div 
+        className="w-full h-full"
+        dangerouslySetInnerHTML={{
+          __html: `
+            <model-viewer
+              src="${glbUrl}"
+              ${usdzUrl ? `ios-src="${usdzUrl}"` : ''}
+              ar
+              ar-modes="webxr scene-viewer quick-look"
+              camera-controls
+              auto-rotate
+              touch-action="none"
+              shadow-intensity="1.2"
+              shadow-softness="0.8"
+              exposure="0.9"
+              loading="eager"
+              reveal="auto"
+              camera-orbit="0deg 75deg 105%"
+              min-camera-orbit="auto auto 50%"
+              max-camera-orbit="auto auto 200%"
+              interaction-prompt="auto"
+              interaction-prompt-threshold="2000"
+              style="width:100%;height:100%;background-color:#111;"
+              alt="3D model of ${dish.dish_name}"
+            >
+              <button slot="ar-button" style="
+                position:absolute; bottom:130px; left:50%; transform:translateX(-50%);
+                padding:14px 28px; background:linear-gradient(to right,#e6c17a,#b38728);
+                color:#0a1128; font-weight:bold; font-size:11px; letter-spacing:0.15em;
+                border:none; border-radius:16px; cursor:pointer;
+                box-shadow:0 8px 32px rgba(230,193,122,0.3);
+              ">👁️ PLACE IN YOUR SPACE</button>
+            </model-viewer>
+          `
+        }}
+      />
 
-        {/* Loading indicator inside model-viewer */}
-        <div slot="progress-bar" style={{
-          position: 'absolute',
-          bottom: '0',
-          left: '0',
-          width: '100%',
-          height: '4px',
-          background: 'linear-gradient(to right, #e6c17a, #b38728)',
-        }}></div>
-      {/* @ts-ignore */}
-      </model-viewer>
+      {/* Model loading status */}
+      {modelStatus === 'loading' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-20 pointer-events-none">
+          <div className="w-10 h-10 border-4 border-white/20 border-t-[#e6c17a] rounded-full animate-spin mb-4"></div>
+          <p className="text-white/60 text-sm">Loading 3D Model...</p>
+          <p className="text-white/20 text-[9px] mt-2 max-w-[250px] text-center break-all">{debugInfo}</p>
+        </div>
+      )}
 
-      {/* Top UI Overlay */}
+      {/* Model error state */}
+      {modelStatus === 'error' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20">
+          <Box className="w-12 h-12 text-red-400 mb-4" />
+          <p className="text-white font-bold mb-2">3D Model Failed to Load</p>
+          <p className="text-white/40 text-xs text-center max-w-[280px] mb-4">{debugInfo}</p>
+          <p className="text-white/30 text-[10px] text-center max-w-[280px] mb-6">
+            This usually means the .GLB file is corrupted or the storage bucket has incorrect permissions.
+          </p>
+          <button onClick={() => router.back()} className="px-6 py-3 bg-white/10 rounded-xl text-sm font-bold border border-white/10">Go Back</button>
+        </div>
+      )}
+
+      {/* Top UI */}
       <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none z-10">
-        <button
-          onClick={() => router.back()}
-          className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 pointer-events-auto active:scale-95 transition-transform"
-        >
+        <button onClick={() => router.back()} className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 pointer-events-auto active:scale-95 transition-transform">
           <X className="w-5 h-5 text-white" />
         </button>
 
-        <button
-          onClick={handleShare}
-          className="flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-[#f9ce34] via-[#ee2a7b] to-[#6228d7] border border-white/20 shadow-lg pointer-events-auto active:scale-95 transition-transform"
-        >
+        <button onClick={handleShare} className="flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-[#f9ce34] via-[#ee2a7b] to-[#6228d7] border border-white/20 shadow-lg pointer-events-auto active:scale-95 transition-transform">
           <svg className="w-4 h-4 text-white mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
             <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
@@ -326,7 +344,7 @@ export default function MobileARPage() {
         </button>
       </div>
 
-      {/* Restaurant Name */}
+      {/* Restaurant name */}
       <div className="absolute top-24 left-0 right-0 text-center pointer-events-none z-10 drop-shadow-2xl">
         <h1 className={`text-4xl md:text-5xl tracking-wide bg-gradient-to-b from-[#e6c17a] to-[#b38728] bg-clip-text text-transparent ${playfair.className}`}>
           {restaurantName || 'Restaurant'}
@@ -334,35 +352,27 @@ export default function MobileARPage() {
       </div>
 
       {/* Bottom UI */}
-      <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 flex flex-col items-center justify-end pointer-events-none z-10 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
-        <h2 className={`text-3xl text-white mb-6 drop-shadow-lg text-center ${playfair.className}`}>
-          {dish.dish_name}
-        </h2>
-
-        <div className="w-full flex items-center justify-between pointer-events-auto">
-          <div className="w-16 h-16"></div>
-
-          <div className="flex flex-col items-center gap-3">
-            <button
-              onClick={handleCapture}
-              className="w-20 h-20 rounded-full border-[4px] border-white/50 flex items-center justify-center active:scale-90 transition-transform"
-            >
-              <div className="w-16 h-16 rounded-full bg-white shadow-lg"></div>
-            </button>
-            <span className="text-[10px] tracking-[0.2em] text-white/80 font-semibold uppercase">Capture Frame</span>
-          </div>
-
-          <div className="w-16 h-16 rounded-2xl overflow-hidden border border-white/20 shadow-xl bg-black/40 backdrop-blur-md flex items-center justify-center relative">
-            {dish.image_url ? (
-              <img src={dish.image_url} alt="thumb" className="w-full h-full object-cover" />
-            ) : (
-              <Camera className="w-6 h-6 text-white/50" />
-            )}
-            <div className="absolute inset-0 ring-1 ring-inset ring-white/10 rounded-2xl"></div>
+      {modelStatus === 'loaded' && (
+        <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 flex flex-col items-center justify-end pointer-events-none z-10 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
+          <h2 className={`text-3xl text-white mb-6 drop-shadow-lg text-center ${playfair.className}`}>{dish.dish_name}</h2>
+          <div className="w-full flex items-center justify-between pointer-events-auto">
+            <div className="w-16 h-16"></div>
+            <div className="flex flex-col items-center gap-3">
+              <button onClick={handleCapture} className="w-20 h-20 rounded-full border-[4px] border-white/50 flex items-center justify-center active:scale-90 transition-transform">
+                <div className="w-16 h-16 rounded-full bg-white shadow-lg"></div>
+              </button>
+              <span className="text-[10px] tracking-[0.2em] text-white/80 font-semibold uppercase">Capture</span>
+            </div>
+            <div className="w-16 h-16 rounded-2xl overflow-hidden border border-white/20 shadow-xl bg-black/40 backdrop-blur-md flex items-center justify-center relative">
+              {dish.image_url ? (
+                <img src={dish.image_url} alt="thumb" className="w-full h-full object-cover" />
+              ) : (
+                <Camera className="w-6 h-6 text-white/50" />
+              )}
+            </div>
           </div>
         </div>
-      </div>
-
+      )}
     </div>
   );
 }
