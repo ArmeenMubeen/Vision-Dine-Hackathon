@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { UploadCloud, Image as ImageIcon, MapPin } from 'lucide-react';
+import { UploadCloud, Image as LucideImage, MapPin } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function AddNewRestaurantPage() {
@@ -169,7 +169,7 @@ export default function AddNewRestaurantPage() {
                   ) : (
                     <div className="flex flex-col items-center justify-center pt-5 pb-6">
                       <div className="w-12 h-12 bg-[#f0f4f8] rounded-full flex items-center justify-center mb-4">
-                        <ImageIcon className="w-6 h-6 text-[#64748b]" />
+                        <LucideImage className="w-6 h-6 text-[#64748b]" />
                       </div>
                       <p className="text-[15px] font-bold text-[#0a1128] mb-1">Upload Banner</p>
                       <p className="text-[13px] text-[#8792a2]">Landscape, Max 2MB</p>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { ArrowLeft, Settings, Plus, Search, Filter, Box, QrCode, Pencil, X, Download, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Settings, Plus, Search, Filter, Box, QrCode, Pencil, X, Download, Image as LucideImage } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 
 export default function RestaurantDashboard() {
@@ -196,7 +196,7 @@ export default function RestaurantDashboard() {
                             <img src={dish.image_url} alt="" className="w-12 h-12 rounded-xl object-cover border border-gray-100 shadow-sm" />
                           ) : (
                             <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-[#8792a2]">
-                              <ImageIcon className="w-5 h-5" />
+                              <LucideImage className="w-5 h-5" />
                             </div>
                           )}
                           <div className="ml-4">

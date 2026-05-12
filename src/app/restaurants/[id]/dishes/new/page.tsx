@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { Image as ImageIcon, UploadCloud, Box, Ruler } from 'lucide-react';
+import { Image as LucideImage, UploadCloud, Box, Ruler } from 'lucide-react';
 
 export default function AddNewDishPage() {
   const router = useRouter();
@@ -245,7 +245,7 @@ export default function AddNewDishPage() {
             {/* Dish Image */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold flex items-center"><ImageIcon className="w-5 h-5 mr-2" /> Dish Image</h2>
+                <h2 className="text-lg font-bold flex items-center"><LucideImage className="w-5 h-5 mr-2" /> Dish Image</h2>
                 <span className="text-[10px] font-bold bg-[#f0f4f8] text-[#64748b] px-2 py-1 rounded uppercase tracking-wider">Required</span>
               </div>
               <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-200 border-dashed rounded-2xl cursor-pointer hover:bg-gray-50 transition-colors overflow-hidden relative">
@@ -254,7 +254,7 @@ export default function AddNewDishPage() {
                 ) : (
                   <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
                     <div className="w-12 h-12 bg-[#eff4ff] text-blue-600 rounded-full flex items-center justify-center mb-3">
-                      <ImageIcon className="w-6 h-6" />
+                      <LucideImage className="w-6 h-6" />
                     </div>
                     <p className="text-sm font-bold text-[#0a1128] mb-1">Click to upload</p>
                     <p className="text-xs text-[#8792a2]">SVG, PNG, JPG or GIF (max. 1MB)</p>
