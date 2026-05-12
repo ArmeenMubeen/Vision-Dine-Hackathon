@@ -62,15 +62,26 @@ export default function AddNewDishPage() {
   };
 
   const uploadFile = async (file: File, bucket: string, prefix: string) => {
-    const ext = file.name.split('.').pop();
-    const fileName = `${prefix}-${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+    if (!file || !file.name) {
+      throw new Error(`Upload failed: No file provided for ${bucket}/${prefix}`);
+    }
+    
+    const ext = (file.name.split('.').pop() || 'bin').replace(/[^a-zA-Z0-9]/g, '');
+    const fileName = `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${ext}`;
+    
+    console.log(`[Supabase Upload] Path: "${fileName}" | Bucket: "${bucket}" | Size: ${file.size} bytes`);
+    
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(fileName, file);
+      .upload(fileName, file, { upsert: true });
     
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      console.error(`[Supabase Upload] FAILED for ${bucket}/${fileName}:`, uploadError);
+      throw uploadError;
+    }
     
     const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
+    console.log(`[Supabase Upload] SUCCESS → ${publicUrlData.publicUrl}`);
     return publicUrlData.publicUrl;
   };
 

@@ -56,30 +56,42 @@ export default function AddNewRestaurantPage() {
 
       // 1. Upload Logo
       if (logoFile) {
-        const ext = logoFile.name.split('.').pop();
-        const fileName = `logo-${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+        const ext = (logoFile.name.split('.').pop() || 'png').replace(/[^a-zA-Z0-9]/g, '');
+        const fileName = `logo-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${ext}`;
+        console.log('[Supabase Upload] Logo path:', fileName, 'Bucket: logos');
+        
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('logos')
-          .upload(fileName, logoFile);
+          .upload(fileName, logoFile, { upsert: true });
         
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          console.error('[Supabase Upload] Logo error:', uploadError);
+          throw uploadError;
+        }
         
         const { data: publicUrlData } = supabase.storage.from('logos').getPublicUrl(fileName);
         logoUrl = publicUrlData.publicUrl;
+        console.log('[Supabase Upload] Logo URL:', logoUrl);
       }
 
       // 2. Upload Banner
       if (bannerFile) {
-        const ext = bannerFile.name.split('.').pop();
-        const fileName = `banner-${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+        const ext = (bannerFile.name.split('.').pop() || 'png').replace(/[^a-zA-Z0-9]/g, '');
+        const fileName = `banner-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${ext}`;
+        console.log('[Supabase Upload] Banner path:', fileName, 'Bucket: banners');
+
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('banners')
-          .upload(fileName, bannerFile);
+          .upload(fileName, bannerFile, { upsert: true });
         
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          console.error('[Supabase Upload] Banner error:', uploadError);
+          throw uploadError;
+        }
         
         const { data: publicUrlData } = supabase.storage.from('banners').getPublicUrl(fileName);
         bannerUrl = publicUrlData.publicUrl;
+        console.log('[Supabase Upload] Banner URL:', bannerUrl);
       }
 
       // 3. Insert into Database
