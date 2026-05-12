@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { ArrowLeft, Settings, Plus, Search, Filter, Box, QrCode, Pencil, X, Download } from 'lucide-react';
+import { ArrowLeft, Settings, Plus, Search, Filter, Box, QrCode, Pencil, X, Download, Image as ImageIcon } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 
 export default function RestaurantDashboard() {
